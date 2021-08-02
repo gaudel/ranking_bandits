@@ -6,29 +6,45 @@ Manage Epsilon-greedy experiments.
 
 Usage:
   exp.py --play <nb_game> [-s <start_game>] <nb_trials>  [-r <record_len>]
-            (--KDD <query> |--Yandex <query> | --std | --small | --big | --xsmall | --xxsmall)
+            ( | [--order_kappa] | [--shuffle_kappa] | [--shuffle_kappa_except_first] | [--increasing_kappa] | [--increasing_kappa_except_first])
+            (--KDD <query>
+            |--Yandex <query>|--Yandex_equi <query> <K>
+            | --std | --small | --big | --xsmall | --xxsmall | --test
+            |--Yandex_CM <query> <nb_position> <nb_item>
+            |--std_CM | --small_CM | --big_CM | --xsmall_CM | --xxsmall_CM | --test_CM)
             (--eGreedy <c> <maj> [--noSVD]
-                | --PBM-TS [--oracle]
-                | --PBM-PIE <epsilon> [--oracle]
-                | --PBM-UCB <epsilon> [--oracle]
-                | --BC-MPTS [--oracle]
+                | --PBM-TS [--oracle|--greedyMLE|--greedySVD]
+                | --PBM-PIE <epsilon> [--oracle|--greedyMLE|--greedySVD]
+                | --PBM-UCB <epsilon> [--oracle|--greedyMLE|--greedySVD]
+                | --BC-MPTS [--oracle|--greedyMLE|--greedySVD]
                 | --PB-MHB <nb_steps> (--TGRW <c> [--vari_sigma]|--LGRW <c> [--vari_sigma]|--RR <c> <str_proposal_possible> [--vari_sigma]|--MaxPos|--PseudoView ) [--random_start]
                 | --PMED <alpha> <gap_MLE> <gap_q>
-                | --BubbleRank <delta> [--sorted] [--oracle]
-                | --TopRank <T> [--horizon_time_known] [--doubling_trick] [--sorted] [--oracle]
+                | --TopRank <T> [--horizon_time_known] [--doubling_trick] [--oracle]
+                | --SGRAB <T>  <gamma> [--force]
+                | --GRAB <T> <gamma> [--force]
+                | --Comb-UCB1
+                | --KL-COMB <T>
             )
             (<output_path> [--force] [--nb_checkpoints <nb_checkpoints>])
   exp.py --merge <nb_trials>  [-r <record_len>]
-            (--KDD_all | --KDD <query> | --Yandex_all | --Yandex <query> | --std | --small | --big | --xsmall | --xxsmall)
+            ( | [--order_kappa] | [--shuffle_kappa] | [--shuffle_kappa_except_first] | [--increasing_kappa] | [--increasing_kappa_except_first])
+            (--KDD_all | --KDD <query>
+            | --Yandex_all| --Yandex <query> | --Yandex_equi_all <K> | --Yandex_equi <query> <K>
+            | --std | --small | --big | --xsmall | --xxsmall | --test
+            | --Yandex_CM_all <nb_position> <nb_item> | --Yandex_CM <query> <nb_position> <nb_item>
+            |--std_CM | --small_CM | --big_CM | --xsmall_CM | --xxsmall_CM | --test_CM)
             (--eGreedy <c> <maj> [--noSVD]
-                | --PBM-TS [--oracle]
-                | --PBM-PIE <epsilon> [--oracle]
-                | --PBM-UCB <epsilon> [--oracle]
-                | --BC-MPTS [--oracle]
+                | --PBM-TS [--oracle|--greedyMLE|--greedySVD]
+                | --PBM-PIE <epsilon> [--oracle|--greedyMLE|--greedySVD]
+                | --PBM-UCB <epsilon> [--oracle|--greedyMLE|--greedySVD]
+                | --BC-MPTS [--oracle|--greedyMLE|--greedySVD]
                 | --PB-MHB <nb_steps> (--TGRW <c> [--vari_sigma]|--LGRW <c> [--vari_sigma]|--RR <c>  <str_proposal_possible> [--vari_sigma]|--MaxPos|--PseudoView ) [--random_start]
                 | --PMED <alpha> <gap_MLE> <gap_q>
-                | --BubbleRank <delta> [--sorted] [--oracle]
-                | --TopRank <T> [--horizon_time_known] [--doubling_trick] [--sorted] [--oracle]
+                | --TopRank <T> [--horizon_time_known] [--doubling_trick] [--oracle]
+                | --SGRAB <T>  <gamma> [--force]
+                | --GRAB <T> <gamma> [--force]
+                | --Comb-UCB1
+                | --KL-COMB <T>
             )
             (<input_path> [<output_path>])
   exp.py (-h | --help)
@@ -41,10 +57,12 @@ Options:
                     ! WARNING ! has to be relative wrt. $SCRATCHDIR or absolute
   -KDD_all          Round-robin on KDD queries
   --nb_checkpoints <nb_checkpoints>     [default: 0]
+  --known_horizon <T>   [default: -1]
 """
 
 
 from param import Parameters, record_zip
+from bandits_to_rank.environment import PositionsRanking
 
 import os
 from glob import glob
@@ -78,6 +96,12 @@ def args_to_params(args):
         params.set_env_Yandex(int(args['<query>']))
     elif args['--Yandex_all']:
         params.set_env_Yandex_all()
+    elif args['--Yandex_equi']:
+        params.set_env_Yandex_equi(query=int(args['<query>']),K=int(args['<K>']))
+    elif args['--Yandex_equi_all']:
+        params.set_env_Yandex_equi_all(K=int(args['<K>']))
+    elif args['--test']:
+        params.set_env_test()
     elif args['--std']:
         params.set_env_std()
     elif args['--small']:
@@ -88,20 +112,82 @@ def args_to_params(args):
         params.set_env_xx_small()
     elif args['--big']:
         params.set_env_big()
+    elif args['--Yandex_CM']:
+        params.set_env_Yandex_CM(query=int(args['<query>']))
+    elif args['--Yandex_CM_all']:
+        params.set_env_Yandex_CM_all()
+    elif args['--test_CM']:
+        params.set_env_test_CM()
+    elif args['--std_CM']:
+        params.set_env_std_CM()
+    elif args['--small_CM']:
+        params.set_env_small_CM()
+    elif args['--xsmall_CM']:
+        params.set_env_extra_small_CM()
+    elif args['--xxsmall_CM']:
+        params.set_env_xx_small_CM()
+    elif args['--big_CM']:
+        params.set_env_big_CM()
     else:
         raise ValueError("unknown environment")
+
+    #### Init environment shuffling
+    if args['--order_kappa']:
+        params.set_positions_ranking(PositionsRanking.DECREASING)
+    elif args['--shuffle_kappa']:
+        params.set_positions_ranking(PositionsRanking.SHUFFLE)
+    elif args['--shuffle_kappa_except_first']:
+        params.set_positions_ranking(PositionsRanking.SHUFFLE_EXCEPT_FIRST)
+    elif args['--increasing_kappa']:
+        params.set_positions_ranking(PositionsRanking.INCREASING)
+    elif args['--increasing_kappa_except_first']:
+        params.set_positions_ranking(PositionsRanking.INCREASING_EXCEPT_FIRST)
+    else:  # default
+        params.set_positions_ranking(PositionsRanking.SHUFFLE)
 
     #### Init player
     if args['--eGreedy']:
         params.set_player_eGreedy(float(args['<c>']), int(args['<maj>']), args['--noSVD'])
     elif args['--PBM-TS']:
-        params.set_player_PBM_TS(args['--oracle'])
+        if args['--oracle']:
+            type = "oracle"
+        elif args['--greedyMLE']:
+            type = "greedyMLE"
+        elif args['--greedySVD']:
+            type = "greedySVD"
+        else:
+            type = "greedySVD"
+        params.set_player_PBM_TS(type=type)
     elif args['--PBM-PIE']:
-        params.set_player_PBM_PIE(float(args['<epsilon>']), int(args['<nb_trials>']),args['--oracle'])
+        if args['--oracle']:
+            type = "oracle"
+        elif args['--greedyMLE']:
+            type = "greedyMLE"
+        elif args['--greedySVD']:
+            type = "greedySVD"
+        else:
+            type = "greedySVD"
+        params.set_player_PBM_PIE(float(epsilon=args['<epsilon>']), T=int(args['<nb_trials>']),type = type)
     elif args['--PBM-UCB']:
-        params.set_player_PBM_UCB(float(args['<epsilon>']), args['--oracle'])
+        if args['--oracle']:
+            type = "oracle"
+        elif args['--greedyMLE']:
+            type = "greedyMLE"
+        elif args['--greedySVD']:
+            type = "greedySVD"
+        else:
+            type = "greedySVD"
+        params.set_player_PBM_UCB(epsilon=float(args['<epsilon>']), type=type)
     elif args['--BC-MPTS']:
-        params.set_player_BC_MPTS(args['--oracle'])
+        if args['--oracle']:
+            type = "oracle"
+        elif args['--greedyMLE']:
+            type = "greedyMLE"
+        elif args['--greedySVD']:
+            type = "greedySVD"
+        else:
+            type = "greedySVD"
+        params.set_player_BC_MPTS(type)
     elif args['--PB-MHB']:  # --PB-MHB <nb_steps> <c> [--random_start]
         if args['--TGRW']:
             params.set_proposal_TGRW(float(args['<c>']), args['--vari_sigma'])
@@ -115,11 +201,17 @@ def args_to_params(args):
             params.set_proposal_PseudoView()
         params.set_player_PB_MHB(int(args['<nb_steps>']),  args['--random_start'])
     elif args['--PMED']:  # --BubbleRank <delta> [--sorted] [--oracle]
-        params.set_player_PMED(float(args['<alpha>']),int(args['<gap_MLE>']),int(args['<gap_q>']))
-    elif args['--BubbleRank']:  # --BubbleRank <delta> [--sorted] [--oracle]
-        params.set_player_BubbleRank(float(args['<delta>']), sorted=args['--sorted'], oracle=args['--oracle'])
+        params.set_player_PMED(float(args['<alpha>']),int(args['<gap_MLE>']),int(args['<gap_q>']), run=args['--play'])
     elif args['--TopRank']:  # --TopRank [--sorted] [--oracle]
-        params.set_player_TopRank(float(args['<T>']), horizon_time_known=args['--horizon_time_known'], doubling_trick=args['--doubling_trick'], sorted=args['--sorted'], oracle=args['--oracle'])
+        params.set_player_TopRank(float(args['<T>']), horizon_time_known=args['--horizon_time_known'], doubling_trick=args['--doubling_trick'], oracle=args['--oracle'])
+    elif args['--SGRAB']:
+        params.set_player_SGRAB(int(args['<T>']), gamma=int(args['<gamma>']), forced_initiation=args['--force'])
+    elif args['--GRAB']:
+        params.set_player_GRAB(T=int(args['<T>']), gamma=int(args['<gamma>']), forced_initiation=args['--force'])
+    elif args['--Comb-UCB1']:
+        params.set_player_CombUCB1()
+    elif args['--KL-COMB']:
+        params.set_player_KL_COMB(horizon=int(args['<T>']))
     else:
         raise ValueError("unknown player")
 
@@ -189,7 +281,7 @@ def play(params, dry_run=False, verbose=True):
                     params.referee = saved_params.referee
                 else:
                     # ... or init and play first trial
-                    params.env.shuffle(fixed_kappa=not params.shuffle_kappa)
+                    params.env.shuffle(positions_ranking=params.positions_ranking)
                     params.player.clean()
                     params.referee.clean_recorded_results()
                     params.referee.prepare_new_game()

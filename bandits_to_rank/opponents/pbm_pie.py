@@ -10,8 +10,8 @@ import scipy.stats as st
 from scipy.optimize import fminbound, root_scalar
 from math import sqrt,log
 
-from bandits_to_rank.sampling.pbm_inference import EM, SVD
 from bandits_to_rank.tools.tools import order_index_according_to_kappa
+from bandits_to_rank.tools.get_inference_model import GetSVD, GetMLE, GetOracle
 
 
 
@@ -20,22 +20,22 @@ class PBM_PIE:
     Source : "Multiple-Play  Bandits  in  the  Position-Based  Model"
     reject sampling with beta preposal
     """
-    def __init__(self, nb_arms, epsilon, T, nb_positions=None, discount_factor=None, lag=1, prior_s=1, prior_f=1, is_shuffled =False):
+    def __init__(self, nb_arms, epsilon, T, nb_position, get_model_kappa, count_update=1, prior_s=1, prior_f=1, is_shuffled =False):
         """
-        One of both `discount_facor` and `nb_positions` has to be defined.
 
         :param nb_arms:
-        :param delta:
-        :param nb_choice:
-        :param discount_factor: if None, discount factors are inferred from logs every `lag` iterations
-        :param lag:
+        :param epsilon:
+        :param T:
+        :param nb_position:
+        :param discount_factor: if None, discount factors are inferred from logs every `count_update` iterations
+        :param count_update:
         :param prior_s:
 
         >>> import numpy as np
         >>> nb_arms = 10
         >>> nb_choices = 3
         >>> discount_factor = [1, 0.9, 0.7]
-        >>> player = PBM_TS(nb_arms, discount_factor=discount_factor)
+        >>> player = PBM_PIE(nb_arms, discount_factor=discount_factor)
 
         # function to assert choices have the right form
         >>> def assert_choices(choices, nb_choices):
@@ -84,53 +84,18 @@ class PBM_PIE:
         >>> # second arm is less drawn
         >>> assert np.all(counts[1] <= counts), "%r" % str(counts)
 
-        # Other choices have to be coherent
-        >>> n_runs = 500
-        >>> nb_choices = 1
-        >>> discount_factor = [1]
-        >>> nb_arms = 10
-        >>> player = PBM_TS(nb_arms, discount_factor=discount_factor)
-        >>> for i in range(nb_arms):
-        ...     for _ in range(5):
-        ...         player.update(np.array([i]), np.array([1]))
-        ...         player.update(np.array([i]), np.array([0]))
-        >>> player.last_present = np.array([0])
-        >>> for _ in range(5):
-        ...     player.update(np.array([0]), np.array([1]))
-        ...     player.update(np.array([1]), np.array([0]))
-        >>> counts = np.zeros(nb_arms)
-        >>> # try one choice
-        >>> assert_choices(player.choose_next_arm(), nb_choices)
-        >>> # try several choices
-        >>> for _ in range(n_runs):
-        ...     choices = player.choose_next_arm()
-        ...     assert_choices(choices, nb_choices)
-        ...     for arm in choices:
-        ...         counts[arm] += 1
-        >>> # cover each arm
-        >>> assert np.all(counts > 0), "%r" % str(counts)
-        >>> # first arm is more drawn
-        >>> assert np.all(counts[0] >= counts), "%r" % str(counts)
-        >>> # second arm is less drawn
-        >>> assert np.all(counts[1] <= counts), "%r" % str(counts)
+
         """
-        if T < nb_arms :
+        if T < nb_arms:
              raise ValueError("Not enought Try")
-        if (discount_factor is None) == (nb_positions is None):
-            raise ValueError("One of both `discount_facor` and `nb_positions` has to be defined")
         self.nb_arms = nb_arms
+        self.nb_position = nb_position
+        self.positions = np.arange(self.nb_position)
         self.epsilon = epsilon
-        if discount_factor is not None:
-            self.known_discount = True
-            self.discount_factor = discount_factor
-            self.nb_positions = len(discount_factor)
-        else:
-            self.known_discount = False
-            self.lag = lag
-            self.nb_positions = nb_positions
 
         self.time_reject = 0
-        self.t = 1 
+        self.count_update = count_update
+        self.get_model_kappa = get_model_kappa
         self.delta = (1+self.epsilon)*log(T)
         self.prior_s = prior_s
         self.prior_f = prior_f
@@ -143,16 +108,14 @@ class PBM_PIE:
         To be ran before playing a new game.
         """
         # clean the model
-        if not self.known_discount:
-            self.learner = SVD(self.nb_arms, self.nb_positions)
-            self.learner.nb_views = np.ones((self.nb_arms, self.nb_positions)) * (self.prior_s+self.prior_f)
-            self.learner.nb_clicks = np.ones((self.nb_arms, self.nb_positions)) * self.prior_s
-            #self.t = 0
-            self.discount_factor = np.ones(self.nb_positions, dtype=np.float)
+        self.model_kappa = self.get_model_kappa()
+        _, self.discount_factor = self.model_kappa.get_params()
+        self.nb_trials = 0
+
 
         # clean the log
-        self.success = np.ones([self.nb_arms, self.nb_positions], dtype=np.int)* self.prior_s
-        self.place_view = np.ones([self.nb_arms, self.nb_positions], dtype=np.int) * (self.prior_s + self.prior_f)
+        self.success = np.ones([self.nb_arms, self.nb_position], dtype=np.int)* self.prior_s
+        self.place_view = np.ones([self.nb_arms, self.nb_position], dtype=np.int) * (self.prior_s + self.prior_f)
         self.n_try = np.zeros(self.nb_arms, dtype=np.int) # number of times a proposal has been drawn for arm i's parameter
         self.n_drawn = np.zeros(self.nb_arms, dtype=np.int) # number of times arm i's parameter has been drawn
         self.warm_up_list = [i for i in range(self.nb_arms)]
@@ -169,14 +132,14 @@ class PBM_PIE:
     
     def phi(self,q,k):
         sum_perf_q_as_theta = 0
-        for l in range(self.nb_positions):
+        for l in range(self.nb_position):
             sum_perf_q_as_theta += self.place_view[k][l] * self.kullback_leibler_divergence(self.success[k][l] / self.place_view[k][l], q * self.discount_factor[l])
         return sum_perf_q_as_theta
     
   
     def build_potential_group(self):
         potential_group=[]
-        for k in range(self.nb_positions):
+        for k in range(self.nb_position):
             if k not in self.top_L_index :
                 theta_min = fminbound(self.phi, 0, 1,args =[k])
                 if self.phi(theta_min,k)*self.phi(1,k) <0:
@@ -203,15 +166,15 @@ class PBM_PIE:
         l_result = l[first:]+l[0:first]
         return l_result
         
-    def choose_next_arm(self):
-        if self.t <=self.nb_arms*2 :
+    def choose_next_arm(self):#### Attention resampling
+        if self.nb_trials <=self.nb_arms*2 :
              #print(self.t-1%self.nb_arms)
-            thetas_index = self.permute_circulaire((self.t-1)%self.nb_arms,self.warm_up_list)[:self.nb_positions]
+            thetas_index = self.permute_circulaire((self.nb_trials -1)%self.nb_arms,self.warm_up_list)[:self.nb_position]
             #print(thetas_index)
             return order_index_according_to_kappa(thetas_index, self.discount_factor), self.time_reject
         
         thetas = [self.get_theta_tild(k) for k in range(self.nb_arms) ]
-        self.top_L_index = np.array(thetas).argsort()[::-1][:self.nb_positions]
+        self.top_L_index = np.array(thetas).argsort()[::-1][:self.nb_position]
         self.time_reject = 0
         
         B = self.build_potential_group()
@@ -223,15 +186,17 @@ class PBM_PIE:
 
     
     def update(self, propositions, rewards):
-        index_kappa_order = [i for i in range(self.nb_positions)] #np.array(self.discount_factor).argsort()[::-1][:self.nb_positions]
-        self.t += 1
-        self.place_view[propositions, index_kappa_order] += 1
-        self.success[propositions, index_kappa_order] += rewards
-        if not self.known_discount:
-            self.learner.add_session(propositions, rewards)
-            if self.t < 100 or self.t % self.lag == 0:
-                self.learner.learn()
-                self.discount_factor = self.learner.get_kappas()
+        # update model of kappa
+        self.nb_trials += 1
+        self.model_kappa.add_session(propositions, rewards)
+        if self.nb_trials <= 100 or self.nb_trials % self.count_update == 0:
+            self.model_kappa.learn()
+            _, self.discount_factor = self.model_kappa.get_params()
+
+        # update PBM_UCB model
+        self.place_view[propositions, self.positions] += 1
+        self.success[propositions, self.positions] += rewards
+
 
     def get_param_estimation(self):
         thetas_estime = [self.get_theta_tild(k) for k in range(self.nb_arms)]
@@ -241,6 +206,27 @@ class PBM_PIE:
         return (self.n_try - self.n_drawn)/self.n_try
 
 
+
+def PBM_PIE_semi_oracle(nb_arms, epsilon, T,  nb_position, discount_factor, prior_s=0.5, prior_f=0.5, count_update=1):
+    """
+    PBM_PIE, where kappa is known.
+    """
+    return PBM_PIE(nb_arms, epsilon=epsilon, T=T,  nb_position=nb_position, get_model_kappa=GetOracle(discount_factor), prior_s=prior_s, prior_f=prior_f, count_update=count_update)
+
+
+def PBM_PIE_Greedy_SVD(nb_arms, epsilon, T,  nb_position, count_update=1, prior_s=0.5, prior_f=0.5):
+    """
+    PBM_PIE, where kappa is inferred assuming on rank-1 model (equivalent to PBM), with parameters inferred through SVD of empirical click-probabilities.
+    """
+    return PBM_PIE(nb_arms, epsilon=epsilon, T=T, nb_position=nb_position, get_model_kappa=GetSVD(nb_arms, nb_position, prior_s, prior_f), prior_s=prior_s, prior_f=prior_f, count_update=count_update)
+
+
+
+def PBM_PIE_Greedy_MLE(nb_arms, epsilon, T, nb_position, count_update=1, prior_s=0.5, prior_f=0.5):
+    """
+    PBM_PIE, where kappa is inferred through MLE of empirical click-probabilities.
+    """
+    return PBM_PIE(nb_arms, epsilon=epsilon, T=T, nb_position = nb_position, get_model_kappa=GetMLE(nb_arms, nb_position, prior_s, prior_f), prior_s=prior_s, prior_f=prior_f, count_update=count_update)
 
 if __name__ == "__main__":
     import doctest

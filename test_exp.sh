@@ -38,7 +38,7 @@ python3 exp.py --merge 100 -r 10 --xxsmall --eGreedy 0.1 10 $TESTDIR/dev_null ||
 
 
 # Other algorithms
-python3 exp.py --play 2 100 -r 10 --small --eGreedy 0.1 10 --noSVD $TESTDIR/dev_null --force --nb_checkpoints 0  || exit # todo: does not support checkpoints for the time being
+python3 exp.py --play 2 100 -r 10 --small --eGreedy 0.1 10 --noSVD $TESTDIR/dev_null --force --nb_checkpoints 1  || exit # todo: does not support checkpoints for the time being
 python3 exp.py --merge 100 -r 10 --small --eGreedy 0.1 10 --noSVD $TESTDIR/dev_null || exit
 
 python3 exp.py --play 2 100 -r 10 --small --PBM-TS $TESTDIR/dev_null --force || exit

@@ -5,11 +5,10 @@ from random import random
 
 import numpy as np
 from numpy.random.mtrand import beta
-import scipy.stats as st
 
 
-from bandits_to_rank.sampling.pbm_inference import EM, SVD
 from bandits_to_rank.tools.tools import order_theta_according_to_kappa_index
+from bandits_to_rank.tools.get_inference_model import GetSVD,GetMLE,GetOracle
 
 
 
@@ -18,21 +17,20 @@ class PBM_TS:
     Source : "Multiple-Play  Bandits  in  the  Position-Based  Model"
     reject sampling with beta preposal
     """
-    def __init__(self, nb_arms, nb_positions=None, discount_factor=None, lag=1, prior_s=1, prior_f=1):
+    def __init__(self, nb_arms, nb_position, get_model_kappa, count_update=1, prior_s=0.5, prior_f=0.5):
         """
-        One of both `discount_facor` and `nb_positions` has to be defined.
 
         :param nb_arms:
-        :param nb_choice:
-        :param discount_factor: if None, discount factors are inferred from logs every `lag` iterations
+        :param nb_position:
+        :param get_model_kappa: if get_model_kappa != Oracle, discount factors are inferred from logs every `lag` iterations
         :param lag:
         :param prior_s:
 
         >>> import numpy as np
         >>> nb_arms = 10
         >>> nb_choices = 3
-        >>> discount_factor = [1, 0.9, 0.7]
-        >>> player = PBM_TS(nb_arms, discount_factor=discount_factor)
+        >>>discount_factor = [1, 0.9, 0.7]
+        >>> player = PBM_TS_semi_oracle(nb_arms,nb_choices, discount_factor=discount_factor)
 
         # function to assert choices have the right form
         >>> def assert_choices(choices, nb_choices):
@@ -61,7 +59,7 @@ class PBM_TS:
         >>> nb_choices = 1
         >>> discount_factor = [1]
         >>> nb_arms = 2
-        >>> player = PBM_TS(nb_arms, discount_factor=discount_factor)
+        >>> player = PBM_TS_semi_oracle(nb_arms,nb_choices, discount_factor=discount_factor)
         >>> for _ in range(3):
         ...     player.update(np.array([0]), np.array([1]))
         ...     player.update(np.array([1]), np.array([0]))
@@ -86,7 +84,7 @@ class PBM_TS:
         >>> nb_choices = 1
         >>> discount_factor = [1]
         >>> nb_arms = 10
-        >>> player = PBM_TS(nb_arms, discount_factor=discount_factor)
+        >>> player = PBM_TS_semi_oracle(nb_arms,nb_choices, discount_factor=discount_factor)
         >>> for i in range(nb_arms):
         ...     for _ in range(5):
         ...         player.update(np.array([i]), np.array([1]))
@@ -111,20 +109,13 @@ class PBM_TS:
         >>> # second arm is less drawn
         >>> assert np.all(counts[1] <= counts), "%r" % str(counts)
         """
-        if (discount_factor is None) == (nb_positions is None):
-            raise ValueError("One of both `discount_facor` and `nb_positions` has to be defined")
         self.nb_arms = nb_arms
         self.prior_s = prior_s
         self.prior_f = prior_f
-        if discount_factor is not None:
-            self.known_discount = True
-            self.discount_factor = discount_factor
-            self.nb_positions = len(discount_factor)
-        else:
-            self.known_discount = False
-            self.lag = lag
-            self.nb_positions = nb_positions
-
+        self.nb_position = nb_position
+        self.positions = np.arange(self.nb_position)
+        self.count_update = count_update
+        self.get_model_kappa = get_model_kappa
         self.time_reject = 0
 
         self.clean()
@@ -134,20 +125,17 @@ class PBM_TS:
         To be ran before playing a new game.
         """
         # clean the model
-        if not self.known_discount:
-            self.learner = SVD(self.nb_arms, self.nb_positions)
-            self.learner.nb_views = np.ones((self.nb_arms, self.nb_positions)) * (self.prior_s+self.prior_f)
-            self.learner.nb_clicks = np.ones((self.nb_arms, self.nb_positions)) * self.prior_s
-            self.t = 0
-            self.discount_factor = np.ones(self.nb_positions, dtype=np.float)
+        self.model_kappa = self.get_model_kappa()
+        _, self.discount_factor = self.model_kappa.get_params()
+        self.nb_trials = 0
 
         # clean the log
-        self.success = np.zeros([self.nb_arms, self.nb_positions], dtype=np.uint)
-        self.place_view = np.zeros([self.nb_arms, self.nb_positions], dtype=np.uint)
+        self.success = np.zeros([self.nb_arms, self.nb_position], dtype=np.int)
+        self.place_view = np.zeros([self.nb_arms, self.nb_position], dtype=np.int)
         self.n_try = np.zeros(self.nb_arms, dtype=np.int) # number of times a proposal has been drawn for arm i's parameter
         self.n_drawn = np.zeros(self.nb_arms, dtype=np.int) # number of times arm i's parameter has been drawn
 
-    def choose_next_arm(self):
+    def choose_next_arm(self):#### Attention resampling
         thetas = np.ones(self.nb_arms, dtype=np.float)
         self.time_reject = 0
         for i in range(self.nb_arms):
@@ -217,10 +205,10 @@ class PBM_TS:
                 self.time_reject += n_inner_try
                 return theta
         #print("WARNING: PBM-TS rejection sampling stopped due to max_try, with alpha =", alpha, ", beta =", beta_param, ", kappa =", more_seen_kappa, ", and threshold =", np.exp(threshold))
-        print('pos', more_seen_position, 'for arm', i_arm)
+        #print('pos', more_seen_position, 'for arm', i_arm)
         #print("prints:\n", self.place_view[i_arm, :])
         #print("clicks:\n", self.success[i_arm, :])
-        print("estimated iteration:", np.sum(self.place_view) / self.nb_positions)
+        #print("estimated iteration:", np.sum(self.place_view) / self.nb_position)
         #print("kappas:\n", self.discount_factor)
         #print("prints:\n", self.place_view)
         #print("clicks:\n", self.success)
@@ -230,17 +218,16 @@ class PBM_TS:
         return theta
 
     def update(self, propositions, rewards):
-        for pos in range(len(propositions)):
-            item = propositions[pos]
-            rew = rewards[pos]
-            self.success[item][pos] += rew
-            self.place_view[item][pos] += 1
-        if not self.known_discount:
-            self.learner.add_session(propositions, rewards)
-            self.t += 1
-            if self.t < 100 or self.t % self.lag == 0:
-                self.learner.learn()
-                self.discount_factor = self.learner.get_kappas()
+        # update model of kappa
+        self.nb_trials += 1
+        self.model_kappa.add_session(propositions, rewards)
+        if self.nb_trials <= 100 or self.nb_trials % self.count_update == 0:
+            self.model_kappa.learn()
+            _, self.discount_factor = self.model_kappa.get_params()
+
+        # update PBM_TS model
+        self.place_view[propositions, self.positions] += 1
+        self.success[propositions, self.positions] += rewards
 
     def get_theta_tild(self, k):
         S_k = sum(self.success[k])
@@ -254,6 +241,33 @@ class PBM_TS:
 
     def reject_proportions(self):
         return (self.n_try - self.n_drawn)/self.n_try
+
+
+
+
+def PBM_TS_semi_oracle(nb_arms, nb_position, discount_factor, prior_s=0.5, prior_f=0.5, count_update=1):
+    """
+    PBM_TS, where kappa is known.
+    """
+    return PBM_TS(nb_arms, nb_position, GetOracle(discount_factor), prior_s=prior_s, prior_f=prior_f, count_update=count_update)
+
+
+
+def PBM_TS_Greedy_SVD(nb_arms, nb_position, count_update=1, prior_s=0.5, prior_f=0.5):
+    """
+    PBM_TS, where kappa is inferred assuming on rank-1 model (equivalent to PBM), with parameters inferred through SVD of empirical click-probabilities.
+    """
+    return PBM_TS(nb_arms, nb_position, GetSVD(nb_arms, nb_position, prior_s, prior_f), prior_s=prior_s, prior_f=prior_f, count_update=count_update)
+
+
+
+def PBM_TS_Greedy_MLE(nb_arms, nb_position, count_update=1, prior_s=0.5, prior_f=0.5):
+    """
+    PBM_TS, where kappa is inferred through MLE of empirical click-probabilities.
+    """
+    return PBM_TS(nb_arms, nb_position, GetMLE(nb_arms, nb_position, prior_s, prior_f), prior_s=prior_s, prior_f=prior_f, count_update=count_update)
+
+
 
 
 

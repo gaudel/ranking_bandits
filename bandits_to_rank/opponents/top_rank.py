@@ -29,6 +29,16 @@ def order_index_according_to_kappa(indices, kappas):
     >>> kappas = np.array([1, 0.8, 0.9])
     >>> order_index_according_to_kappa(index, kappas)
     array([5, 3, 1])
+
+    >>> index = np.array([5, 1, 3])
+    >>> kappas = np.array([0.7, 0.8, 0.9])
+    >>> order_index_according_to_kappa(index, kappas)
+    array([3, 1, 5])
+
+    >>> index = np.array([5, 1, 3])
+    >>> kappas = np.array([4, 2, 3])
+    >>> order_index_according_to_kappa(index, kappas)
+    array([5, 3, 1])
     """
 
     nb_position = len(kappas)

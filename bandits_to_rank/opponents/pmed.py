@@ -49,13 +49,67 @@ class PMED:
             minimum number of trials between two updates of inferred values `(thetas_hat, kappas_hat)`
         gap_q
             minimum number of trials between two updates of inferred value `q`
+
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> np.set_printoptions(precision=3)
+        >>> player = PMED(5, 3, 1.)
+        >>> player.l_current = {(0,1,2)}
+        >>> player.nb_prints = 1000 * np.array([[30, 3, 3],
+        ...        [5, 30, 1],
+        ...        [1, 3, 30],
+        ...        [1, 1, 1],
+        ...        [1, 1, 3]])
+        >>> player.nb_trials = player.nb_prints[:,0].sum()
+        >>> player.nb_trials
+        38000
+        >>> thetas = np.array([0.9, 0.7, 0.5, 0.45, 0.1])
+        >>> kappas = np.array([1, 0.9, 0.8])
+        >>> player.nb_clics = np.array((thetas.reshape((-1,1)) @ kappas.reshape((1,-1))) * player.nb_prints, dtype=np.int)
+        >>> player.nb_clics
+        array([[27000,  2430,  2160],
+               [ 3500, 18900,   559],
+               [  500,  1350, 12000],
+               [  450,   405,   360],
+               [  100,    90,   240]])
+        >>> player.mus_hat = player.nb_clics / player.nb_prints
+        >>> prop, _ = player.choose_next_arm()
+        >>> prop
+        array([0, 1, 2])
+        >>> for _ in range(100):
+        ...     player.update_thetas_hat_kappas_hat()
+        >>> player.kappas_hat
+        array([1. , 0.9, 0.8])
+        >>> player.thetas_hat
+        array([0.9 , 0.7 , 0.5 , 0.45, 0.1 ])
+        >>> player.update(prop, np.array([0,1,0]))
+
+        >>> player.kappas_hat
+        array([1. , 0.9, 0.8])
+        >>> player.thetas_hat
+        array([0.9 , 0.7 , 0.5 , 0.45, 0.1 ])
+        >>> np.array(player.q * np.log(player.nb_trials), dtype=np.int)
+        array([[3501,   43,    0,    0,    0],
+               [  43, 3467,   34,    0,    0],
+               [   0,   32,  343, 1584, 1584],
+               [   0,    0, 3129,  208,  208],
+               [   0,    1,   38, 1752, 1752]])
+        >>> print([(np.round(c,3), perm) for c, perm in player.decompose_nb_prints_tilde()])
+        [(1584.419, array([0, 1, 3, 2, 4])), (1539.614, array([0, 1, 3, 4, 2])), (175.106, array([0, 1, 2, 4, 3])), (168.432, array([0, 1, 2, 3, 4])), (38.133, array([1, 0, 4, 3, 2])), (32.946, array([0, 2, 1, 4, 3])), (5.185, array([1, 0, 3, 4, 2])), (1.488, array([0, 4, 1, 3, 2])), (0.0, array([4, 0, 1, 3, 2])), (0.0, array([0, 3, 1, 2, 4]))]
+        >>> player.l_current
+        {(0, 1, 2), (1, 0, 3), (0, 1, 3)}
         """
         self.nb_arms = nb_arms
         self.nb_positions = nb_positions
         self.alpha = alpha
         self.gap_MLE = gap_MLE
         self.gap_q = gap_q
-        self.rng = np.random.default_rng()
+        try:
+            self.rng = np.random.default_rng()
+        except:
+            self.rng = np.random
         self.clean()
 
     def clean(self):
@@ -82,7 +136,10 @@ class PMED:
         self.l_current = set(self.basic_permutations)
 
     def choose_next_arm(self):
-        propositions = list(self.l_current)[self.rng.integers(len(self.l_current))]
+        try:
+            propositions = list(self.l_current)[self.rng.integers(len(self.l_current))]
+        except:
+            propositions = list(self.l_current)[self.rng.randint(len(self.l_current))]
         self.l_current.remove(propositions)
         return np.array(propositions), 0
 
@@ -288,8 +345,13 @@ class PMED:
             b_ub[s] = -1
             # WARNING: matrices are flatten in row-major (C-style) order
 
-            res = scipy.optimize.linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=None,
-                                         method='interior-point', callback=None, options=None, x0=None)
+            try:
+                res = scipy.optimize.linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=None,
+                                             method='interior-point', callback=None, options=None, x0=None)
+            except TypeError as e:
+                res = scipy.optimize.linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=None,
+                                             method='interior-point', callback=None, options=None)
+
             if verbose:
                 print("q (ordered):", res.x.reshape((self.nb_arms, self.nb_arms)))
                 print("sum delta.q:", res.fun)
@@ -671,7 +733,10 @@ class PMED:
                 #print('max(N_tilde)', np.max(n_tilde))
                 #print('min(N_tilde != 0)', np.min(n_tilde[n_tilde > epsilon]))
                 print('nb(N_tilde > epsilon)', np.sum(n_tilde > epsilon))
-            _, perm = linear_sum_assignment(np.array(n_tilde > epsilon, dtype=np.int).T, maximize=True)
+            try:
+                _, perm = linear_sum_assignment(np.array(n_tilde > epsilon, dtype=np.int).T, maximize=True)
+            except TypeError as e:
+                _, perm = linear_sum_assignment(-np.array(n_tilde > epsilon, dtype=np.int).T)
             c = np.min(n_tilde[perm, self.pseudo_positions])
             n_tilde[perm, self.pseudo_positions] -= c
             res[tuple(perm[:self.nb_positions])] += c

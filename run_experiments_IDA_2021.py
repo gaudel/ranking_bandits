@@ -72,42 +72,44 @@ def myplot(ref, label, color, linestyle):
 # =====================================
 # =====================================
 
+
+
 # --- play PB-MHB (preliminary) ---
 for m, c, random_start in [(1, 10**-1, False), (1, 10**0, False), (1, 10**1, False), (1, 10**2, False),
                            (1, 10**3, False), (10, 10**0, False), (10, 10**3, False), (1, 10**3, True)]:
-    args1 = f'{preliminary_nb_iter}'
+    args1 = f'{preliminary_nb_iter} --shuffle_kappa_except_first'
     args2 = f'--PB-MHB {m} --TGRW {c} --vari_sigma {path_to_logs} {" --random_start" if random_start else ""}'
     run_alg(args1, args2)
 
 # --- play PB-MHB ---
 for m, c, random_start in [(1, 10**3, False)]:
-    args1 = f'{nb_iter}'
+    args1 = f'{nb_iter} --shuffle_kappa_except_first'
     args2 = f'--PB-MHB {m} --TGRW {c} --vari_sigma {path_to_logs} {" --random_start" if random_start else ""}'
     run_alg(args1, args2)
 
 # --- play epsilon-greedy ---
 for c in [10**0, 10**1, 10**2, 10**3, 10**4, 10**5, 10**6]:
-    args1 = f'{nb_iter}'
+    args1 = f'{nb_iter} --shuffle_kappa'
     args2 = f'--eGreedy {c} 1 {path_to_logs}'
     run_alg(args1, args2, no_checkpoints=True)  # epsilon-greedy does not support checkpoints for the time being
 
 
 # --- play TopRank ---
-args1 = f'{nb_iter}'
-args2 = f'--TopRank {nb_iter} --horizon_time_known --sorted {path_to_logs}'
+args1 = f'{nb_iter} --order_kappa'
+args2 = f'--TopRank {nb_iter} --horizon_time_known {path_to_logs}'
 run_alg(args1, args2)
 
 # --- play PMED ---
-args1 = f'{nb_iter}'
+args1 = f'{nb_iter} --order_kappa'
 args2 = f'--PMED 1 10 0 {path_to_logs}'
 run_alg(args1, args2)
+
 
 # =====================================
 # =====================================
 # plot Fig 1.a curves
 # =====================================
 # =====================================
-
 for env_name in env_names:
     if env_name == 'Yandex':
         env_name = f'{env_name}_all'
@@ -204,8 +206,8 @@ for env_name in env_names:
     # --- load data ---
     refs = {}
     refs[f'PB-MHB'] = retrieve_data_from_zip(f'{prefix}Bandit_PB-MHB_warm-up_start_1_step_TGRW_1000.0_c_vari_sigma_proposal{suffix}')
-    refs['eGreedy'] = retrieve_data_from_zip(f'{prefix}Bandit_EGreedy_SVD_10000.0_c_1_update{suffix}')
-    refs['TopRank'] = retrieve_data_from_zip(f'{prefix}extended_kappas__sorted_kappa__Bandit_TopRank_{float(nb_iter)}_delta_TimeHorizonKnown_{suffix}')
+    refs['eGreedy'] = retrieve_data_from_zip(f'{prefix}shuffled_kappa__Bandit_EGreedy_SVD_10000.0_c_1_update{suffix}')
+    refs['TopRank'] = retrieve_data_from_zip(f'{prefix}sorted_kappa__Bandit_TopRank_{float(nb_iter)}_delta_TimeHorizonKnown_{suffix}')
     refs[f'PMED'] = retrieve_data_from_zip(f'{prefix}sorted_kappa__Bandit_PMED_1.0_alpha_1_gap_MLE_0_gap_q{suffix}')
 
     # --- plot curve ---

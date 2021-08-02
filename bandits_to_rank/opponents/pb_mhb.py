@@ -287,9 +287,11 @@ class propos_Round_Robin():
 ## TS_MH
 
     
-class TS_MH_kappa_desordonne:
+class PB_MHB:
     """
-    Our Algo (aka.PB-MHB)
+     C-S. Gauthier, R. Gaudel, E. Fromont
+    Position-Based Multiple-Play Bandits with Thompson Sampling
+    PB-MHB
     """
     def __init__(self, nb_arms, nb_position, proposal_method=propos_trunk_GRW(vari_sigma=True, c=3), initial_particule=None, step=10, prior_s=0.5, prior_f=0.5, part_followed=True,  store_eff=False):
         self.nb_arms = nb_arms

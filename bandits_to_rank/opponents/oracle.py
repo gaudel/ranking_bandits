@@ -32,10 +32,13 @@ class Oracle:
     def __init__(self, best_arm):
         self.best_arm = best_arm
         self.time_reject = 0
-    
+
+    def clean(self):
+        pass
+
     def choose_next_arm(self):
-        return self.best_arm,self.time_reject
-    
+        return self.best_arm, self.time_reject
+
     def update(self, arm, reward):
         pass
     

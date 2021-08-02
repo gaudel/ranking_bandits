@@ -5,6 +5,7 @@
 
 from bandits_to_rank.sampling.pbm_inference import *
 from bandits_to_rank.tools.tools import order_theta_according_to_kappa_index
+from bandits_to_rank.tools.get_inference_model import GetOracle, GetSVD, GetMLE
 
 
 from random import sample
@@ -74,14 +75,6 @@ class BC_MPTS:
         return 'BC_MPTS'
 
 
-class GetOracle():
-    def __init__(self, kappas):
-        self.kappas = kappas
-
-    def __call__(self):
-        return Oracle(kappas=self.kappas)
-
-
 def BC_MPTS_semi_oracle(nb_arms, nb_position, discount_factor, prior_s=0.5, prior_f=0.5, count_update=1):
     """
     BC-MPTS, where kappa is known.
@@ -89,24 +82,18 @@ def BC_MPTS_semi_oracle(nb_arms, nb_position, discount_factor, prior_s=0.5, prio
     return BC_MPTS(nb_arms, nb_position, GetOracle(discount_factor), prior_s=prior_s, prior_f=prior_f, count_update=count_update)
 
 
-class GetSVD():
-    def __init__(self, nb_arms, nb_positions, prior_s=0.5, prior_f=0.5):
-        self.nb_arms = nb_arms
-        self.nb_positions = nb_positions
-        self.prior_s = prior_s
-        self.prior_f = prior_f
 
-    def __call__(self):
-        model = SVD(self.nb_arms, self.nb_positions)
-        model.nb_views = np.zeros((self.nb_arms, self.nb_positions), dtype=np.uint) + self.prior_s
-        model.nb_clicks = np.zeros((self.nb_arms, self.nb_positions), dtype=np.uint) + self.prior_s + self.prior_f
-        model.learn()
-        return model
-
-
-def BC_MPTS_Greedy(nb_arms, nb_position, count_update=1, prior_s=0.5, prior_f=0.5):
+def BC_MPTS_Greedy_SVD(nb_arms, nb_position, count_update=1, prior_s=0.5, prior_f=0.5):
     """
     BC-MPTS, where kappa is inferred assuming on rank-1 model (equivalent to PBM), with parameters inferred through SVD of empirical click-probabilities.
     """
     return BC_MPTS(nb_arms, nb_position, GetSVD(nb_arms, nb_position, prior_s, prior_f), prior_s=prior_s, prior_f=prior_f, count_update=count_update)
+
+
+
+def BC_MPTS_Greedy_MLE(nb_arms, nb_position, count_update=1, prior_s=0.5, prior_f=0.5):
+    """
+    BC-MPTS, where kappa is inferred through MLE of empirical click-probabilities.
+    """
+    return BC_MPTS(nb_arms, nb_position, GetMLE(nb_arms, nb_position, prior_s, prior_f), prior_s=prior_s, prior_f=prior_f, count_update=count_update)
 

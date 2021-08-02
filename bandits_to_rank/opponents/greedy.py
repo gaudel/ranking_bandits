@@ -8,6 +8,7 @@ import random as rd
 
 from bandits_to_rank.sampling.pbm_inference import *
 from bandits_to_rank.tools.tools import order_theta_according_to_kappa_index
+from bandits_to_rank.tools.get_inference_model import GetSVD, GetEM, GetMLE
 
 from pyclick.click_models.PBM import PBM
 from pyclick.click_models.task_centric.TaskCentricSearchSession import TaskCentricSearchSession
@@ -18,6 +19,28 @@ from random import random
 
 
 
+def simule_log_Pyclick(nb_reco,theta,kappa):
+    search_sessions=[]
+    nb_position = len(kappa)
+    nb_item = len(theta)
+    indice_item = [x for x in range(nb_item)]
+    for reco in range(nb_reco):
+        #print('recommandation numero = ',reco)
+        web_results =[]
+        ### tire aléatoirement la présentation des produits :
+        proposition=sample(indice_item,nb_position)
+        #print ('produits proposes',proposition)
+        for pos in range(len(proposition)):
+            #print ('a la position', pos )
+            index_produit = proposition[pos]
+            #print('je propose',index_produit)
+            is_view = int(random() < kappa[pos])
+            is_click= int(random() < theta[index_produit])
+            web_results.append(SearchResult(index_produit,is_view*is_click))
+        ###simulation comportement
+        search_sessions.append(TaskCentricSearchSession(reco,'Reco'))
+        search_sessions[-1].web_results = web_results
+    return(search_sessions)
 
 def extract_kappa(clickmodel,nb_position):
     param =[]
@@ -50,6 +73,106 @@ def give_thetas_Pyclick(sessions):
     click_model = PBM()
     click_model.train(sessions)
     return order_thetas(extract_theta (click_model))
+
+
+## Algo
+
+class greedy:
+    """Construction d'un Bandit
+    Source:
+      Parameter
+    nb_arms : nombre de bras a etudier
+    kappas : cllick rate of prositions
+      Attributs:
+    performance = cumule des fois ou le bras a ete clique,
+    nb_trials : array(n,2) nombre de fois ou les categories sont vues,
+    nb_position
+    """
+
+    def __init__(self, nb_arms, nb_position, count_update):
+        self.nb_trials = 0
+        self.nb_arms = nb_arms
+        self.nb_position = nb_position
+        self.count_update = count_update
+        self.pbm_model = SVD(nb_arms, nb_position)
+        self.thetas_pyclic =  np.zeros(nb_arms)
+        self.kappas_pyclic =  np.zeros(nb_position)
+        self.pbm_model.nb_views = np.ones((nb_arms, nb_position), dtype=np.int)*0.0001
+        self.time_reject = 0
+
+    def choose_next_arm(self):
+        if self.nb_trials == 0 :
+            self.nb_trials += 1
+            return rd.sample(range(self.nb_arms),self.nb_position), self.time_reject
+        else :
+            if (self.nb_trials < 100) :
+                self.pbm_model.learn()
+                self.thetas_pyclic,self.kappas_pyclic =   self.pbm_model.get_params()
+            else :
+                if self.nb_trials%self.count_update == 0 :
+                    self.pbm_model.learn()
+                    self.thetas_pyclic,self.kappas_pyclic =   self.pbm_model.get_params()
+            self.nb_trials += 1
+            return order_theta_according_to_kappa_index(self.thetas_pyclic, self.kappas_pyclic), self.time_reject
+
+
+    def update(self, propositions, rewards):
+         self.pbm_model.add_session(propositions,rewards)
+
+
+    def type(self):
+        return 'greedy'
+
+
+class greedy_EM:
+    """Construction d'un Bandit
+    Source:
+      Parameter
+    nb_arms : nombre de bras a etudier
+    kappas : cllick rate of prositions
+      Attributs:
+    performance = cumule des fois ou le bras a ete clique,
+    nb_trials : array(n,2) nombre de fois ou les categories sont vues,
+    nb_position
+    """
+
+    def __init__(self, nb_arms, nb_position, count_update):
+        self.nb_trials = 0
+        self.nb_arms = nb_arms
+        self.nb_position = nb_position
+        self.count_update = count_update
+        self.pbm_model = EM(nb_arms, nb_position)
+        self.thetas_pyclic =  np.zeros(nb_arms)
+        self.kappas_pyclic =  np.zeros(nb_position)
+        self.pbm_model.nb_views = np.ones((nb_arms, nb_position), dtype=np.int)*0.0001
+        self.time_reject = 0
+
+    def choose_next_arm(self):
+        if self.nb_trials == 0 :
+            self.nb_trials += 1
+            return rd.sample(range(self.nb_arms),self.nb_position)
+        else :
+            if (self.nb_trials < 100) :
+                self.pbm_model.learn()
+                self.thetas_pyclic,self.kappas_pyclic =   self.pbm_model.get_params()
+            else :
+                if self.nb_trials%self.count_update == 0 :
+                    self.pbm_model.learn()
+                    self.thetas_pyclic,self.kappas_pyclic =   self.pbm_model.get_params()
+            self.nb_trials += 1
+            #if self.nb_trials%100 == 0  :
+                #print ('Greedy trial n° '+str(self.nb_trials))
+            return order_theta_according_to_kappa_index(self.thetas_pyclic, self.kappas_pyclic), self.time_reject
+
+
+    def update(self, propositions, rewards):
+         self.pbm_model.add_session(propositions,rewards)
+
+
+    def type(self):
+        return 'greedy_Cascade'
+
+
 
 
 ### General E_greedy
@@ -100,17 +223,6 @@ class EGreedy (object):
         return self.thetas_pyclic, self.kappas_pyclic
 
 
-### Specific E_greedy
-# Wrap the function `get_model()` in a class to enable pickling
-class GetSVD():
-    def __init__(self, nb_arms, nb_positions):
-        self.nb_arms = nb_arms
-        self.nb_positions = nb_positions
-
-    def __call__(self):
-        res = SVD(self.nb_arms, self.nb_positions)
-        res.nb_views = np.ones((self.nb_arms, self.nb_positions), dtype=np.int) * 0.0001
-        return res
 
 def greedy_EGreedy(c, nb_arms, nb_position, count_update):
     """
@@ -119,16 +231,6 @@ def greedy_EGreedy(c, nb_arms, nb_position, count_update):
     return EGreedy(c, count_update, GetSVD(nb_arms, nb_position))
 
 
-# Wrap the function `get_model()` in a class to enable pickling
-class GetEM():
-    def __init__(self, nb_arms, nb_positions):
-        self.nb_arms = nb_arms
-        self.nb_positions = nb_positions
-
-    def __call__(self):
-        res = EM(self.nb_arms, self.nb_positions)
-        res.nb_views = np.ones((self.nb_arms, self.nb_positions), dtype=np.int) * 0.0001
-        return res
 
 def greedy_EGreedy_EM(c, nb_arms, nb_position, count_update):
     """
